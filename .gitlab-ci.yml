@@ -1,0 +1,42 @@
+---
+image: docker:latest
+
+# https://docs.gitlab.com/ee/user/application_security/dependency_scanning/
+
+# We push two tags:
+#
+# 1. an immutable one with the build number ($CI_PIPELINE_IID) for patch releases
+# 2. a mutable one for users that don't care to pin down to the patch level
+stages:
+  - build
+
+build:
+  stage: build
+  only:
+    - test
+    - master
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u "$BAP_REGISTRY_USERNAME" -p "$BAP_REGISTRY_PASSWORD" $BAP_REGISTRY_URL
+  script:
+    - export VERSION=$(test "$CI_COMMIT_REF_NAME" == master && awk -F '[ ":]+' '$2 == "version" { print $3 }' package.json || echo $CI_COMMIT_REF_NAME)
+    - docker build --target=test -t cotton:test .
+    - docker build --target=prod -t $BAP_REGISTRY_URL/cotton:$VERSION --label com.datadoghq.tags.service="cotton" --label com.datadoghq.tags.version="${VERSION}" .
+    - docker push $BAP_REGISTRY_URL/cotton:$VERSION
+    - docker tag $BAP_REGISTRY_URL/cotton:$VERSION $BAP_REGISTRY_URL/cotton:$VERSION.$CI_PIPELINE_IID
+    - docker push $BAP_REGISTRY_URL/cotton:$VERSION.$CI_PIPELINE_IID
+
+build-dev:
+  stage: build
+  only:
+      - /^issue-.*$/
+  services:
+      - docker:dind
+  before_script:
+      - docker login -u "$BAP_REGISTRY_USERNAME" -p "$BAP_REGISTRY_PASSWORD" $BAP_REGISTRY_URL
+  script:
+      - export VERSION=$CI_COMMIT_BRANCH
+      - docker build --target=test -t cotton:test .
+      - docker build --target=prod -t $BAP_REGISTRY_URL/cotton:$VERSION --label com.datadoghq.tags.service="cotton" --label com.datadoghq.tags.version="${VERSION}" .
+      - docker push $BAP_REGISTRY_URL/cotton:$VERSION
